@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "description": "hey rams",
+    "status": "todo",
+    "createdAt": "2026-09-11T10:00:00.000Z",
+    "updatedAt": "2026-09-11T15:24:59.275Z"
+  },
+  {
+    "id": 2,
+    "description": "Finish database assignment",
+    "status": "in-progress",
+    "createdAt": "2026-09-11T11:00:00.000Z",
+    "updatedAt": "2026-09-11T12:30:00.000Z"
+  },
+  {
+    "id": 5,
+    "description": "Practice JavaScript CLI arguments",
+    "status": "done",
+    "createdAt": "2026-09-11T13:00:00.000Z",
+    "updatedAt": "2026-09-11T15:00:00.000Z"
+  }
+]
