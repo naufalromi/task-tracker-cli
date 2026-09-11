@@ -14,7 +14,7 @@ try {
 
     const validStatuses = ['todo', 'in-progress', 'done'];
     const isValidTask = tasks.every((task) => {
-        task &&
+        return task &&
         typeof task === 'object' &&
         Number.isInteger(task.id) &&
         task.id > 0 &&

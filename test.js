@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { after, before, test } = require('node:test');
 
 const originalDir = process.cwd();
@@ -25,6 +26,27 @@ function captureConsole(method, callback) {
     }
 
     return messages.join('\n');
+}
+
+function createCliDirectory(initialData) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-tracker-cli-cli-'));
+
+    if (initialData !== undefined) {
+        fs.writeFileSync(path.join(directory, 'data.json'), initialData);
+    }
+
+    return directory;
+}
+
+function runCli(directory, ...arguments_) {
+    return spawnSync(process.execPath, [path.join(projectDir, 'app.js'), ...arguments_], {
+        cwd: directory,
+        encoding: 'utf8'
+    });
+}
+
+function removeDirectory(directory) {
+    fs.rmSync(directory, { recursive: true, force: true });
 }
 
 before(() => {
@@ -68,11 +90,13 @@ test('updateTask and status functions persist changes', () => {
 test('list and view functions display matching tasks', () => {
     const done = captureConsole('log', () => tasks.listDone());
     const inProgress = captureConsole('log', () => tasks.listInProgress());
+    const todo = captureConsole('log', () => tasks.listTodo());
     const view = captureConsole('log', () => tasks.viewTask(6));
 
     assert.match(done, /Task: 6/);
     assert.match(done, /Description: Write CLI tests/);
     assert.match(inProgress, /Task: 2/);
+    assert.match(todo, /Task: 1/);
     assert.match(view, /Status: done/);
 });
 
@@ -81,4 +105,133 @@ test('deleteTask removes the task from the temporary data file', () => {
 
     assert.equal(output, 'Task deleted: 6');
     assert.equal(readTasks().some(({ id }) => id === 6), false);
+});
+
+test('CLI creates data.json automatically on first use', () => {
+    const directory = createCliDirectory();
+
+    try {
+        const result = runCli(directory, 'create', 'First task');
+
+        assert.equal(result.status, 0);
+        assert.equal(result.stdout.trim(), 'Task created: 1');
+        const savedTasks = JSON.parse(fs.readFileSync(path.join(directory, 'data.json'), 'utf8'));
+        assert.equal(savedTasks.length, 1);
+        assert.equal(savedTasks[0].id, 1);
+        assert.equal(savedTasks[0].description, 'First task');
+        assert.equal(savedTasks[0].status, 'todo');
+        assert.ok(Date.parse(savedTasks[0].createdAt));
+        assert.ok(Date.parse(savedTasks[0].updatedAt));
+    } finally {
+        removeDirectory(directory);
+    }
+});
+
+test('CLI rejects blank task descriptions', () => {
+    const directory = createCliDirectory('[]');
+
+    try {
+        for (const command of [
+            ['create'],
+            ['create', '   '],
+            ['update', '1'],
+            ['update', '1', '   ']
+        ]) {
+            const result = runCli(directory, ...command);
+
+            assert.equal(result.status, 1, command.join(' '));
+            assert.match(result.stderr, /Error: .*description/i);
+        }
+
+        assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'data.json'), 'utf8')), []);
+    } finally {
+        removeDirectory(directory);
+    }
+});
+
+test('CLI rejects missing, non-numeric, and non-positive IDs', () => {
+    const directory = createCliDirectory('[]');
+    const commands = ['delete', 'update', 'mark-done', 'mark-in-progress', 'view'];
+
+    try {
+        for (const command of commands) {
+            for (const invalidId of [undefined, 'abc', '0', '-1', '1.5']) {
+                const arguments_ = invalidId === undefined ? [command] : [command, invalidId];
+                const result = runCli(directory, ...arguments_);
+
+                assert.equal(result.status, 1, arguments_.join(' '));
+                assert.match(result.stderr, /Error: Invalid task ID/);
+            }
+        }
+    } finally {
+        removeDirectory(directory);
+    }
+});
+
+test('CLI reports an error when a requested task does not exist', () => {
+    const directory = createCliDirectory('[]');
+
+    try {
+        for (const command of [
+            ['delete', '1'],
+            ['update', '1', 'Changed task'],
+            ['mark-done', '1'],
+            ['mark-in-progress', '1'],
+            ['view', '1']
+        ]) {
+            const result = runCli(directory, ...command);
+
+            assert.equal(result.status, 1, command.join(' '));
+            assert.match(result.stderr, /Error: Task not found/);
+        }
+    } finally {
+        removeDirectory(directory);
+    }
+});
+
+test('CLI rejects unsupported list options', () => {
+    const directory = createCliDirectory('[]');
+
+    try {
+        const result = runCli(directory, 'list', 'later');
+
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /Error: Invalid list option/);
+    } finally {
+        removeDirectory(directory);
+    }
+});
+
+test('CLI handles malformed, wrongly structured, and duplicate task data gracefully', () => {
+    const validTask = {
+        id: 1,
+        description: 'Valid task',
+        status: 'todo',
+        createdAt: '2026-09-11T10:00:00.000Z',
+        updatedAt: '2026-09-11T10:00:00.000Z'
+    };
+    const invalidTaskData = [
+        'not JSON',
+        '{}',
+        'false',
+        JSON.stringify([{ ...validTask, id: 0 }]),
+        JSON.stringify([{ ...validTask, description: '   ' }]),
+        JSON.stringify([{ ...validTask, status: 'waiting' }]),
+        JSON.stringify([{ ...validTask, createdAt: 'not a date' }]),
+        JSON.stringify([{ ...validTask, updatedAt: 'not a date' }]),
+        JSON.stringify([validTask, { ...validTask, description: 'Duplicate ID' }])
+    ];
+
+    for (const invalidData of invalidTaskData) {
+        const directory = createCliDirectory(invalidData);
+
+        try {
+            const result = runCli(directory, 'list');
+
+            assert.equal(result.status, 1, invalidData);
+            assert.match(result.stderr, /Error: data\.json is corrupted or inaccessible/);
+        } finally {
+            removeDirectory(directory);
+        }
+    }
 });
