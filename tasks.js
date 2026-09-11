@@ -1,6 +1,45 @@
 const fs = require('fs');
-const data = fs.readFileSync('data.json', 'utf8');
-const tasks = JSON.parse(data);
+const dataFile = 'data.json';
+let tasks;
+try {
+    if (!fs.existsSync(dataFile)) {
+        fs.writeFileSync(dataFile, '[]');
+    }
+
+    const data = fs.readFileSync(dataFile, 'utf8');
+    tasks = JSON.parse(data);
+    if (!Array.isArray(tasks)) {
+        throw new Error('Task data is not an array');
+    }
+
+    const validStatuses = ['todo', 'in-progress', 'done'];
+    const isValidTask = tasks.every((task) => {
+        task &&
+        typeof task === 'object' &&
+        Number.isInteger(task.id) &&
+        task.id > 0 &&
+        typeof task.description === 'string' &&
+        task.description.trim() !== '' &&
+        validStatuses.includes(task.status) &&
+        typeof task.createdAt === 'string' &&
+        !isNaN(Date.parse(task.createdAt)) &&
+        typeof task.updatedAt === 'string' &&
+        !isNaN(Date.parse(task.updatedAt));
+    });
+    if (!isValidTask) {
+        throw new Error('Task data has invalid structure or values');
+    }
+
+    const taskIds = tasks.map((task) => task.id);
+    const uniqueIds = new Set(taskIds);
+    if (uniqueIds.size !== tasks.length) {
+        throw new Error('Task IDs must be unique.');
+    }
+    
+} catch (err) {
+    console.error('Error: data.json is corrupted or inaccessible', err);
+    process.exit(1);
+}
 let id = tasks.length > 0 ? Math.max(...tasks.map(task => task.id)) + 1 : 1;
 
 module.exports = {
@@ -8,6 +47,7 @@ module.exports = {
     deleteTask,
     listDone,
     listInProgress,
+    listTodo,
     listAll,
     viewTask,
     updateTask,
@@ -30,11 +70,11 @@ function createTask(description) {
 }
 
 function deleteTask(id) {
-    console.log(`Task deleted: ${id}`);
     const taskIndex = tasks.findIndex(task => task.id === id);
     if (taskIndex !== -1) {
         tasks.splice(taskIndex, 1);
         fs.writeFileSync('data.json', JSON.stringify(tasks, null, 2));
+        console.log(`Task deleted: ${id}`);
     } else {
         error('Task not found.');
     }
@@ -53,6 +93,17 @@ function listDone() {
 
 function listInProgress() {
     tasks.filter(task => task.status === 'in-progress').forEach(task => {
+        console.log(`Task: ${task.id}`);
+        console.log(`Status: ${task.status}`);
+        console.log(`Description: ${task.description}`);
+        console.log(`Created At: ${task.createdAt}`);
+        console.log(`Updated At: ${task.updatedAt}`);
+        console.log('-------------------------');
+    });
+}
+
+function listTodo() {
+    tasks.filter(task => task.status === 'todo').forEach(task => {
         console.log(`Task: ${task.id}`);
         console.log(`Status: ${task.status}`);
         console.log(`Description: ${task.description}`);
